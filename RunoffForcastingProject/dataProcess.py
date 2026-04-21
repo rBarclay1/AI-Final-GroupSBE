@@ -8,7 +8,8 @@ STATION_A_USGS_PATH = "RunoffForcastingProject/20380357/09520500_Strt_2021-04-20
 STATION_B_NWM_PATH  = "RunoffForcastingProject/21609641/streamflow_21609641_*.csv"
 STATION_B_USGS_PATH = "RunoffForcastingProject/21609641/11266500_Strt_2021-04-20_EndAt_2023-04-21.csv"
 
-TRAIN_END   = "2022-09-30 23:00:00"
+VAL_START   = "2022-08-01 00:00:00"
+TRAIN_END   = "2022-07-31 23:00:00"
 TEST_START  = "2022-10-01 00:00:00"
 
 
@@ -88,10 +89,13 @@ def align_and_compute_errors(nwm_wide, usgs_hourly):
         result[usgs_col]  = usgs_at_valid
         result[error_col] = result[nwm_col] - result[usgs_col]
 
+    result['usgs_obs_t0'] = usgs_hourly.reindex(result['init_time'].values).values
+
     all_data_cols = (
         [f'NWM_lead_{h}h'     for h in range(1, 19)] +
         [f'USGS_at_lead_{h}h' for h in range(1, 19)] +
-        [f'error_lead_{h}h'   for h in range(1, 19)]
+        [f'error_lead_{h}h'   for h in range(1, 19)] +
+        ['usgs_obs_t0']
     )
     n_before = len(result)
     result = result.dropna(subset=all_data_cols)
@@ -100,23 +104,26 @@ def align_and_compute_errors(nwm_wide, usgs_hourly):
     return result
 
 
-def split_train_test(df):
-    train = df[df['init_time'] <= TRAIN_END].copy()
+def split_train_val_test(df):
+    train = df[df['init_time'] <  VAL_START].copy()
+    val   = df[(df['init_time'] >= VAL_START) & (df['init_time'] <= TRAIN_END)].copy()
     test  = df[df['init_time'] >= TEST_START].copy()
-    print(f"  Train: {len(train):,} rows  |  Test: {len(test):,} rows")
-    assert train['init_time'].max() < test['init_time'].min(), \
-        "Overlap detected between train and test sets — check split dates!"
-    return train, test
+    print(f"  Train: {len(train):,} rows  |  Val: {len(val):,} rows  |  Test: {len(test):,} rows")
+    assert train['init_time'].max() < val['init_time'].min(), \
+        "Overlap detected between train and val sets — check split dates!"
+    assert val['init_time'].max() < test['init_time'].min(), \
+        "Overlap detected between val and test sets — check split dates!"
+    return train, val, test
 
 
-def normalize(train_df, test_df, feature_cols):
+def normalize(train_df, val_df, test_df, feature_cols):
     scaler = StandardScaler()
 
     X_train = scaler.fit_transform(train_df[feature_cols].values)
-
+    X_val   = scaler.transform(val_df[feature_cols].values)
     X_test  = scaler.transform(test_df[feature_cols].values)
 
-    return X_train, X_test, scaler
+    return X_train, X_val, X_test, scaler
 
 
 def process_station(station_name, nwm_path_pattern, usgs_path):
@@ -139,28 +146,33 @@ def process_station(station_name, nwm_path_pattern, usgs_path):
     print("[5] Aligning NWM forecasts with USGS observations...")
     aligned = align_and_compute_errors(nwm_wide, usgs_hourly)
 
-    print("[6] Splitting train / test...")
-    train_df, test_df = split_train_test(aligned)
+    print("[6] Splitting train / val / test...")
+    train_df, val_df, test_df = split_train_val_test(aligned)
 
     print("[7] Normalizing features (fit on train only)...")
-    feature_cols = [f'NWM_lead_{h}h' for h in range(1, 19)]
-    X_train, X_test, scaler = normalize(train_df, test_df, feature_cols)
+    feature_cols = [f'NWM_lead_{h}h' for h in range(1, 19)] + ['usgs_obs_t0']
+    X_train, X_val, X_test, scaler = normalize(train_df, val_df, test_df, feature_cols)
 
     error_cols = [f'error_lead_{h}h' for h in range(1, 19)]
     y_train = train_df[error_cols].values
+    y_val   = val_df[error_cols].values
     y_test  = test_df[error_cols].values
 
-    print(f"\n  X_train shape : {X_train.shape}  (samples × 18 NWM lead features)")
+    print(f"\n  X_train shape : {X_train.shape}  (samples × 19 features)")
     print(f"  y_train shape : {y_train.shape}  (samples × 18 error targets)")
+    print(f"  X_val   shape : {X_val.shape}")
     print(f"  X_test  shape : {X_test.shape}")
     print(f"  y_test  shape : {y_test.shape}")
 
     return {
         'train_df'     : train_df,
+        'val_df'       : val_df,
         'test_df'      : test_df,
         'X_train'      : X_train,
+        'X_val'        : X_val,
         'X_test'       : X_test,
         'y_train'      : y_train,
+        'y_val'        : y_val,
         'y_test'       : y_test,
         'scaler'       : scaler,
         'feature_cols' : feature_cols,
@@ -174,7 +186,9 @@ if __name__ == "__main__":
     station_b = process_station("21609641 (11266500)", STATION_B_NWM_PATH, STATION_B_USGS_PATH)
 
     print("\n\nPreprocessing complete. Ready for model training.")
-    print("  station_a['X_train'] → input features for Station A")
+    print("  station_a['X_train'] → input features for Station A (19 cols: 18 NWM leads + usgs_obs_t0)")
     print("  station_a['y_train'] → NWM error targets for Station A")
-    print("  station_b['X_train'] → input features for Station B")
+    print("  station_a['X_val']   → validation features for Station A")
+    print("  station_b['X_train'] → input features for Station B (19 cols: 18 NWM leads + usgs_obs_t0)")
     print("  station_b['y_train'] → NWM error targets for Station B")
+    print("  station_b['X_val']   → validation features for Station B")
