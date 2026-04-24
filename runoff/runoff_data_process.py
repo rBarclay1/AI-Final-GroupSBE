@@ -1,16 +1,19 @@
+import os
 import pandas as pd
 import glob
 from sklearn.preprocessing import StandardScaler
 
-STATION_A_NWM_PATH  = "RunoffForcastingProject/20380357/streamflow_20380357_*.csv"
-STATION_A_USGS_PATH = "RunoffForcastingProject/20380357/09520500_Strt_2021-04-20_EndAt_2023-04-21.csv"
+_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 
-STATION_B_NWM_PATH  = "RunoffForcastingProject/21609641/streamflow_21609641_*.csv"
-STATION_B_USGS_PATH = "RunoffForcastingProject/21609641/11266500_Strt_2021-04-20_EndAt_2023-04-21.csv"
+STATION_A_NWM_PATH  = os.path.join(_DATA_DIR, '20380357', 'streamflow_20380357_*.csv')
+STATION_A_USGS_PATH = os.path.join(_DATA_DIR, '20380357', '09520500_Strt_2021-04-20_EndAt_2023-04-21.csv')
 
-VAL_START   = "2022-08-01 00:00:00"
-TRAIN_END   = "2022-07-31 23:00:00"
-TEST_START  = "2022-10-01 00:00:00"
+STATION_B_NWM_PATH  = os.path.join(_DATA_DIR, '21609641', 'streamflow_21609641_*.csv')
+STATION_B_USGS_PATH = os.path.join(_DATA_DIR, '21609641', '11266500_Strt_2021-04-20_EndAt_2023-04-21.csv')
+
+VAL_START  = "2022-08-01 00:00:00"
+VAL_END    = "2022-09-30 23:00:00"
+TEST_START = "2022-10-01 00:00:00"
 
 
 def load_nwm(path_pattern):
@@ -18,7 +21,7 @@ def load_nwm(path_pattern):
     if not files:
         raise FileNotFoundError(f"No NWM files found at: {path_pattern}")
     df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
-    print(f"  Loaded {len(files)} NWM files → {len(df):,} rows")
+    print(f"  Loaded {len(files)} NWM files -> {len(df):,} rows")
     return df
 
 
@@ -47,7 +50,7 @@ def pivot_nwm_wide(df):
 
     wide.columns = [f'NWM_lead_{int(c)}h' for c in wide.columns]
     wide = wide.reset_index()
-    print(f"  NWM pivoted → {len(wide):,} initialization times x {wide.shape[1]-1} lead columns")
+    print(f"  NWM pivoted -> {len(wide):,} initialization times x {wide.shape[1]-1} lead columns")
     return wide
 
 
@@ -63,14 +66,14 @@ def load_usgs_hourly(path):
 
     n_before = len(df)
     df = df[df[quality_col] == 'A'].copy()
-    print(f"  USGS quality filter: {n_before:,} → {len(df):,} rows (kept 'A' only)")
+    print(f"  USGS quality filter: {n_before:,} -> {len(df):,} rows (kept 'A' only)")
 
     df = df.set_index('DateTime')
 
     usgs_hourly = df['USGSFlowValue'].resample('1h', label='left').mean()
 
     usgs_hourly = usgs_hourly.dropna()
-    print(f"  USGS resampled → {len(usgs_hourly):,} hourly observations")
+    print(f"  USGS resampled -> {len(usgs_hourly):,} hourly observations")
     return usgs_hourly
 
 
@@ -106,7 +109,7 @@ def align_and_compute_errors(nwm_wide, usgs_hourly):
 
 def split_train_val_test(df):
     train = df[df['init_time'] <  VAL_START].copy()
-    val   = df[(df['init_time'] >= VAL_START) & (df['init_time'] <= TRAIN_END)].copy()
+    val   = df[(df['init_time'] >= VAL_START) & (df['init_time'] <= VAL_END)].copy()
     test  = df[df['init_time'] >= TEST_START].copy()
     print(f"  Train: {len(train):,} rows  |  Val: {len(val):,} rows  |  Test: {len(test):,} rows")
     assert train['init_time'].max() < val['init_time'].min(), \
@@ -186,9 +189,9 @@ if __name__ == "__main__":
     station_b = process_station("21609641 (11266500)", STATION_B_NWM_PATH, STATION_B_USGS_PATH)
 
     print("\n\nPreprocessing complete. Ready for model training.")
-    print("  station_a['X_train'] → input features for Station A (19 cols: 18 NWM leads + usgs_obs_t0)")
-    print("  station_a['y_train'] → NWM error targets for Station A")
-    print("  station_a['X_val']   → validation features for Station A")
-    print("  station_b['X_train'] → input features for Station B (19 cols: 18 NWM leads + usgs_obs_t0)")
-    print("  station_b['y_train'] → NWM error targets for Station B")
-    print("  station_b['X_val']   → validation features for Station B")
+    print("  station_a['X_train'] -> input features for Station A (19 cols: 18 NWM leads + usgs_obs_t0)")
+    print("  station_a['y_train'] -> NWM error targets for Station A")
+    print("  station_a['X_val']   -> validation features for Station A")
+    print("  station_b['X_train'] -> input features for Station B (19 cols: 18 NWM leads + usgs_obs_t0)")
+    print("  station_b['y_train'] -> NWM error targets for Station B")
+    print("  station_b['X_val']   -> validation features for Station B")
