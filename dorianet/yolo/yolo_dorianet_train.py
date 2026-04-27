@@ -100,7 +100,7 @@ def train_model(dataset_dir: Path, results_dir: Path) -> YOLO:
 
 
 #Evaluate 
-def evaluate(model: YOLO, dataset_dir: Path, results_dir: Path)
+def evaluate(model: YOLO, dataset_dir: Path, results_dir: Path):
     test_dir = dataset_dir / 'test'
 
     # Collect images/ground truth lables
