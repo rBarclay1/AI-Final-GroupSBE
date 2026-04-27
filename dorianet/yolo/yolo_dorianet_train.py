@@ -22,7 +22,7 @@ _MASK_DIR    = (_SCRIPT_DIR / '..' / 'data' / 'raw' / 'MASK').resolve()
 _RESULTS_DIR = _SCRIPT_DIR / 'results'
 
 #Hyperparameters 
-MODEL_CKPT  = 'yolov8s-cls.pt'
+MODEL_CKPT  = 'yolov8m-cls.pt'
 CLASS_NAMES = ['Level0', 'Level1', 'Level2', 'Level3', 'Level4', 'Level5']
 IMG_SIZE    = 224   # identical to CNN
 BATCH       = 32    # identical to CNN
@@ -89,7 +89,9 @@ def train_model(dataset_dir: Path, results_dir: Path) -> YOLO:
         batch=BATCH,
         patience=PATIENCE,
         seed=SEED,
-        workers=0,          
+        workers=0,
+        dropout=0.5,
+        label_smoothing=0.1,
         project=str(results_dir),
         name='yolo_dorianet',
         exist_ok=True,
