@@ -36,29 +36,35 @@ def _encoder_block(x, d_model, nhead, dim_feedforward, dropout):
 
 
 def build_runoff_transformer(
-    seq_len=19,
-    d_model=64,
-    nhead=4,
-    dim_feedforward=128,
+    seq_len=18,           # NWM leads only — USGS obs is a separate conditioning input
+    d_model=128,          # up from 64
+    nhead=8,              # up from 4; key_dim = d_model // nhead = 16
+    dim_feedforward=256,  # up from 128 (kept at 2 × d_model)
     dropout=0.1,
-    num_layers=2,
+    num_layers=4,         # up from 2
 ):
-    inputs = keras.layers.Input(shape=(seq_len,))
+    nwm_input  = keras.layers.Input(shape=(seq_len,), name="nwm_leads")
+    usgs_input = keras.layers.Input(shape=(1,),       name="usgs_obs")
 
-    x = keras.layers.Reshape((seq_len, 1))(inputs)
-    x = keras.layers.Dense(d_model)(x)
+    # Project each NWM lead scalar to d_model
+    x = keras.layers.Reshape((seq_len, 1))(nwm_input)
+    x = keras.layers.Dense(d_model)(x)                           # (batch, 18, d_model)
+
+    # Project the USGS observation to d_model, then tile it across all 18 positions
+    # so every encoder layer can attend to the current observed flow as a global bias.
+    usgs_ctx = keras.layers.Dense(d_model)(usgs_input)           # (batch, d_model)
+    usgs_ctx = keras.layers.RepeatVector(seq_len)(usgs_ctx)      # (batch, 18, d_model)
+    x = keras.layers.Add()([x, usgs_ctx])
 
     x = PositionalEmbedding(seq_len, d_model)(x)
 
     for _ in range(num_layers):
         x = _encoder_block(x, d_model, nhead, dim_feedforward, dropout)
 
-    x = x[:, :18, :]
-
     x       = keras.layers.Dense(1)(x)
-    outputs = keras.layers.Reshape((18,))(x)
+    outputs = keras.layers.Reshape((seq_len,))(x)
 
-    return keras.Model(inputs=inputs, outputs=outputs)
+    return keras.Model(inputs=[nwm_input, usgs_input], outputs=outputs)
 
 
 if __name__ == "__main__":

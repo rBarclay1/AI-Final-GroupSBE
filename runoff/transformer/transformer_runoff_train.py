@@ -16,12 +16,39 @@ from runoff_data_process import (
 from transformer_runoff_model import build_runoff_transformer
 from transformer_runoff_visualize import plot_all
 
-_RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results')
+_RESULTS_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results')
+_USGS_LEAD_COLS = [f'USGS_at_lead_{h}h' for h in range(1, 19)]
 
 BATCH_SIZE = 64
 EPOCHS     = 100
 LR         = 1e-3
 PATIENCE   = 10
+
+
+def high_flow_weighted_mse(alpha=5.0, flow_scale=100.0):
+    """
+    Weighted MSE that penalises errors during high-flow events more heavily.
+
+    y_true layout expected by this loss:
+      columns  0:18  — true NWM errors (m³/s), what the model is trained to predict
+      columns 18:36  — raw USGS observed flow at each lead hour (m³/s), used only
+                       to compute per-lead weights; not a model target
+
+    Weight per lead = 1 + alpha * (usgs_obs / flow_scale)
+      - At  0 m³/s : weight = 1.0  (baseline)
+      - At 100 m³/s: weight = 6.0  (alpha=5, flow_scale=100)
+      - At 400 m³/s: weight = 21.0
+
+    The augmented y layout avoids adding a second output head to the model and
+    keeps the loss self-contained.
+    """
+    def loss(y_true, y_pred):
+        true_errors = y_true[:, :18]
+        usgs_obs    = y_true[:, 18:]
+        weights     = 1.0 + alpha * (usgs_obs / flow_scale)
+        sq_err      = keras.ops.square(y_pred - true_errors)
+        return keras.ops.mean(weights * sq_err)
+    return loss
 
 
 def run(station_name, nwm_path, usgs_path):
@@ -34,8 +61,16 @@ def run(station_name, nwm_path, usgs_path):
     model = build_runoff_transformer()
     model.compile(
         optimizer=keras.optimizers.Adam(LR),
-        loss="MeanSquaredError",
-        metrics=["mse"],
+        loss=high_flow_weighted_mse(alpha=5.0, flow_scale=100.0),
+    )
+
+    # Augment targets with raw USGS-at-lead values so the loss function can
+    # compute per-lead flow weights without a separate model input.
+    y_train_aug = np.concatenate(
+        [data['y_train'], data['train_df'][_USGS_LEAD_COLS].values], axis=1
+    )
+    y_val_aug = np.concatenate(
+        [data['y_val'], data['val_df'][_USGS_LEAD_COLS].values], axis=1
     )
 
     save_path = os.path.join(_RESULTS_DIR, f"transformer_runoff_model_{station_name.split()[0]}.keras")
@@ -55,18 +90,15 @@ def run(station_name, nwm_path, usgs_path):
     ]
 
     history = model.fit(
-        data['X_train'], data['y_train'],
+        [data['X_nwm_train'], data['X_usgs_train']], y_train_aug,
         batch_size=BATCH_SIZE,
         epochs=EPOCHS,
-        validation_data=(data['X_val'], data['y_val']),
+        validation_data=([data['X_nwm_val'], data['X_usgs_val']], y_val_aug),
         callbacks=callbacks,
         verbose=1,
     )
 
-    test_mse = model.evaluate(data['X_test'], data['y_test'], verbose=0)[0]
-    print(f"\n  Test MSE : {test_mse:.6f}")
-
-    preds         = model.predict(data['X_test'], verbose=0)
+    preds         = model.predict([data['X_nwm_test'], data['X_usgs_test']], verbose=0)
     rmse_per_lead = np.sqrt(np.mean((preds - data['y_test']) ** 2, axis=0))
 
     print("\n  RMSE by lead hour (m³/s):")

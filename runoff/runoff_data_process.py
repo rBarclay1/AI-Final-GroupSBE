@@ -1,7 +1,7 @@
 import os
+import numpy as np
 import pandas as pd
 import glob
-from sklearn.preprocessing import StandardScaler
 
 _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 
@@ -119,14 +119,30 @@ def split_train_val_test(df):
     return train, val, test
 
 
-def normalize(train_df, val_df, test_df, feature_cols):
-    scaler = StandardScaler()
+def log_scale_features(train_df, val_df, test_df, nwm_cols, usgs_col):
+    """
+    Apply log1p to NWM flow and USGS observation features.
 
-    X_train = scaler.fit_transform(train_df[feature_cols].values)
-    X_val   = scaler.transform(val_df[feature_cols].values)
-    X_test  = scaler.transform(test_df[feature_cols].values)
+    Clips values to 0 before the log to guard against small numerical negatives
+    that occasionally appear in NWM output. log1p is stateless so no fitting on
+    the training set is required, eliminating train/val/test leakage concerns.
 
-    return X_train, X_val, X_test, scaler
+    Returns separate arrays for the NWM sequence (N x 18) and USGS scalar (N x 1)
+    so the model can treat them as distinct inputs.
+    """
+    def _log(df, cols):
+        return np.log1p(np.maximum(df[cols].values, 0.0))
+
+    X_nwm_train = _log(train_df, nwm_cols)
+    X_nwm_val   = _log(val_df,   nwm_cols)
+    X_nwm_test  = _log(test_df,  nwm_cols)
+
+    X_usgs_train = np.log1p(np.maximum(train_df[[usgs_col]].values, 0.0))
+    X_usgs_val   = np.log1p(np.maximum(val_df[[usgs_col]].values,   0.0))
+    X_usgs_test  = np.log1p(np.maximum(test_df[[usgs_col]].values,  0.0))
+
+    return (X_nwm_train, X_nwm_val, X_nwm_test,
+            X_usgs_train, X_usgs_val, X_usgs_test)
 
 
 def process_station(station_name, nwm_path_pattern, usgs_path):
@@ -152,33 +168,41 @@ def process_station(station_name, nwm_path_pattern, usgs_path):
     print("[6] Splitting train / val / test...")
     train_df, val_df, test_df = split_train_val_test(aligned)
 
-    print("[7] Normalizing features (fit on train only)...")
-    feature_cols = [f'NWM_lead_{h}h' for h in range(1, 19)] + ['usgs_obs_t0']
-    X_train, X_val, X_test, scaler = normalize(train_df, val_df, test_df, feature_cols)
+    print("[7] Log-scaling NWM and USGS features...")
+    nwm_cols = [f'NWM_lead_{h}h' for h in range(1, 19)]
+    usgs_col = 'usgs_obs_t0'
+
+    (X_nwm_train, X_nwm_val, X_nwm_test,
+     X_usgs_train, X_usgs_val, X_usgs_test) = log_scale_features(
+        train_df, val_df, test_df, nwm_cols, usgs_col
+    )
 
     error_cols = [f'error_lead_{h}h' for h in range(1, 19)]
     y_train = train_df[error_cols].values
     y_val   = val_df[error_cols].values
     y_test  = test_df[error_cols].values
 
-    print(f"\n  X_train shape : {X_train.shape}  (samples × 19 features)")
-    print(f"  y_train shape : {y_train.shape}  (samples × 18 error targets)")
-    print(f"  X_val   shape : {X_val.shape}")
-    print(f"  X_test  shape : {X_test.shape}")
-    print(f"  y_test  shape : {y_test.shape}")
+    print(f"\n  X_nwm_train shape  : {X_nwm_train.shape}  (samples × 18 log-scaled NWM leads)")
+    print(f"  X_usgs_train shape : {X_usgs_train.shape}   (samples × 1 log-scaled USGS obs at t0)")
+    print(f"  y_train shape      : {y_train.shape}  (samples × 18 error targets, raw m³/s)")
+    print(f"  X_nwm_val shape    : {X_nwm_val.shape}")
+    print(f"  X_nwm_test shape   : {X_nwm_test.shape}")
+    print(f"  y_test shape       : {y_test.shape}")
 
     return {
         'train_df'     : train_df,
         'val_df'       : val_df,
         'test_df'      : test_df,
-        'X_train'      : X_train,
-        'X_val'        : X_val,
-        'X_test'       : X_test,
+        'X_nwm_train'  : X_nwm_train,
+        'X_nwm_val'    : X_nwm_val,
+        'X_nwm_test'   : X_nwm_test,
+        'X_usgs_train' : X_usgs_train,
+        'X_usgs_val'   : X_usgs_val,
+        'X_usgs_test'  : X_usgs_test,
         'y_train'      : y_train,
         'y_val'        : y_val,
         'y_test'       : y_test,
-        'scaler'       : scaler,
-        'feature_cols' : feature_cols,
+        'nwm_cols'     : nwm_cols,
         'error_cols'   : error_cols,
         'aligned'      : aligned,
     }
@@ -189,9 +213,9 @@ if __name__ == "__main__":
     station_b = process_station("21609641 (11266500)", STATION_B_NWM_PATH, STATION_B_USGS_PATH)
 
     print("\n\nPreprocessing complete. Ready for model training.")
-    print("  station_a['X_train'] -> input features for Station A (19 cols: 18 NWM leads + usgs_obs_t0)")
-    print("  station_a['y_train'] -> NWM error targets for Station A")
-    print("  station_a['X_val']   -> validation features for Station A")
-    print("  station_b['X_train'] -> input features for Station B (19 cols: 18 NWM leads + usgs_obs_t0)")
-    print("  station_b['y_train'] -> NWM error targets for Station B")
-    print("  station_b['X_val']   -> validation features for Station B")
+    print("  station_a['X_nwm_train']  -> 18 log-scaled NWM lead features for Station A")
+    print("  station_a['X_usgs_train'] -> 1 log-scaled USGS obs at t0 for Station A")
+    print("  station_a['y_train']      -> NWM error targets for Station A (raw m³/s)")
+    print("  station_b['X_nwm_train']  -> 18 log-scaled NWM lead features for Station B")
+    print("  station_b['X_usgs_train'] -> 1 log-scaled USGS obs at t0 for Station B")
+    print("  station_b['y_train']      -> NWM error targets for Station B (raw m³/s)")
