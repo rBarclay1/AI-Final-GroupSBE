@@ -27,12 +27,18 @@ def _load_image(path, label):
     return tf.cast(img, tf.float32), label
 
 
+_rotation = tf.keras.layers.RandomRotation(factor=15 / 360, fill_mode='reflect')
+_zoom     = tf.keras.layers.RandomZoom(height_factor=0.1, width_factor=0.1)
+
+
 def _augment(img, label):
     img = tf.image.random_flip_left_right(img)
     img = tf.image.random_flip_up_down(img)
     img = tf.image.random_brightness(img, max_delta=0.2)
     img = tf.image.random_contrast(img, lower=0.8, upper=1.2)
     img = tf.clip_by_value(img, 0.0, 255.0)
+    img = _rotation(img, training=True)
+    img = _zoom(img, training=True)
     return img, label
 
 

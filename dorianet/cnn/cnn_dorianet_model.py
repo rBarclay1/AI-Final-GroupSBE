@@ -9,7 +9,7 @@ IMG_SIZE   = 224
 NUM_CLASSES = 6
 
 
-def build_dorianet_cnn(dropout=0.4):
+def build_dorianet_cnn(dropout=0.5):
     base = keras.applications.EfficientNetB0(
         include_top=False,
         weights="imagenet",
@@ -22,7 +22,7 @@ def build_dorianet_cnn(dropout=0.4):
     x = base(x, training=False)
     x = keras.layers.GlobalAveragePooling2D()(x)
     x = keras.layers.BatchNormalization()(x)
-    x = keras.layers.Dense(256, activation="relu")(x)
+    x = keras.layers.Dense(256, activation="relu", kernel_regularizer=keras.regularizers.L2(0.001))(x)
     x = keras.layers.Dropout(dropout)(x)
     outputs = keras.layers.Dense(NUM_CLASSES, activation="softmax")(x)
 

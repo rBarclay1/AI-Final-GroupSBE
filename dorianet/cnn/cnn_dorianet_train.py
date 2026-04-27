@@ -16,7 +16,6 @@ EPOCHS        = 50
 EPOCHS_FINETUNE = 30
 LR            = 1e-3
 LR_FINETUNE   = 1e-5
-PATIENCE      = 8
 
 
 def run():
@@ -26,15 +25,15 @@ def run():
     model = build_dorianet_cnn()
     model.compile(
         optimizer=keras.optimizers.Adam(LR),
-        loss="sparse_categorical_crossentropy",
+        loss=keras.losses.SparseCategoricalCrossentropy(label_smoothing=0.1),
         metrics=["accuracy"],
     )
 
     save_path = os.path.join(_RESULTS_DIR, "cnn_dorianet_model.keras")
 
-    callbacks = [
+    callbacks1 = [
         keras.callbacks.EarlyStopping(
-            monitor="val_loss", patience=PATIENCE, restore_best_weights=True
+            monitor="val_loss", patience=12, restore_best_weights=True
         ),
         keras.callbacks.ReduceLROnPlateau(
             monitor="val_loss", factor=0.5, patience=4, verbose=1
@@ -50,7 +49,7 @@ def run():
         epochs=EPOCHS,
         validation_data=val_ds,
         class_weight=class_weight,
-        callbacks=callbacks,
+        callbacks=callbacks1,
         verbose=1,
     )
 
@@ -62,16 +61,28 @@ def run():
 
     model.compile(
         optimizer=keras.optimizers.Adam(LR_FINETUNE),
-        loss="sparse_categorical_crossentropy",
+        loss=keras.losses.SparseCategoricalCrossentropy(label_smoothing=0.1),
         metrics=["accuracy"],
     )
+
+    callbacks2 = [
+        keras.callbacks.EarlyStopping(
+            monitor="val_loss", patience=15, restore_best_weights=True
+        ),
+        keras.callbacks.ReduceLROnPlateau(
+            monitor="val_loss", factor=0.5, patience=4, verbose=1
+        ),
+        keras.callbacks.ModelCheckpoint(
+            save_path, monitor="val_accuracy", save_best_only=True, verbose=0
+        ),
+    ]
 
     history2 = model.fit(
         train_ds,
         epochs=EPOCHS_FINETUNE,
         validation_data=val_ds,
         class_weight=class_weight,
-        callbacks=callbacks,
+        callbacks=callbacks2,
         verbose=1,
     )
 
