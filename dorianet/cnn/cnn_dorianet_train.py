@@ -25,7 +25,7 @@ def run():
     model = build_dorianet_cnn()
     model.compile(
         optimizer=keras.optimizers.Adam(LR),
-        loss=keras.losses.SparseCategoricalCrossentropy(label_smoothing=0.1),
+        loss=keras.losses.SparseCategoricalCrossentropy(),
         metrics=["accuracy"],
     )
 
@@ -54,14 +54,14 @@ def run():
     )
 
     print("\n--- Phase 2: Fine-tuning top 20 layers ---")
-    base = model.layers[2]
+    base = next(l for l in model.layers if isinstance(l, keras.Model))
     base.trainable = True
     for layer in base.layers[:-20]:
         layer.trainable = False
 
     model.compile(
         optimizer=keras.optimizers.Adam(LR_FINETUNE),
-        loss=keras.losses.SparseCategoricalCrossentropy(label_smoothing=0.1),
+        loss=keras.losses.SparseCategoricalCrossentropy(),
         metrics=["accuracy"],
     )
 

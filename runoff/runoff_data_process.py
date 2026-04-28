@@ -11,8 +11,14 @@ STATION_A_USGS_PATH = os.path.join(_DATA_DIR, '20380357', '09520500_Strt_2021-04
 STATION_B_NWM_PATH  = os.path.join(_DATA_DIR, '21609641', 'streamflow_21609641_*.csv')
 STATION_B_USGS_PATH = os.path.join(_DATA_DIR, '21609641', '11266500_Strt_2021-04-20_EndAt_2023-04-21.csv')
 
-VAL_START  = "2022-08-01 00:00:00"
-VAL_END    = "2022-09-30 23:00:00"
+
+# bad val
+# VAL_START  = "2022-08-01 00:00:00"
+# VAL_END    = "2022-09-30 23:00:00"
+# TEST_START = "2022-10-01 00:00:00"
+
+VAL_START  = "2022-04-01 00:00:00"
+VAL_END    = "2022-07-31 23:00:00"
 TEST_START = "2022-10-01 00:00:00"
 
 
@@ -59,7 +65,7 @@ def load_usgs_hourly(path):
 
     df['DateTime'] = (
         pd.to_datetime(df['DateTime'], utc=True)
-          .dt.tz_localize(None)
+          .dt.tz_convert(None)
     )
 
     quality_col = [c for c in df.columns if c not in ('DateTime', 'USGSFlowValue')][0]

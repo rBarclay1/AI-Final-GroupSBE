@@ -28,6 +28,31 @@ def _rmse_by_lead(y_true, y_pred):
     return np.sqrt(np.mean((y_pred - y_true) ** 2, axis=0))
 
 
+def plot_training_history(
+    histories,
+    station_names,
+    save_path=os.path.join(_RESULTS_DIR, "lstm_runoff_training_history.png"),
+):
+    fig, axes = plt.subplots(1, len(histories), figsize=(14, 5))
+    if len(histories) == 1:
+        axes = [axes]
+
+    for ax, hist, name in zip(axes, histories, station_names):
+        epochs = range(1, len(hist.history["loss"]) + 1)
+        ax.plot(epochs, hist.history["loss"],     label="Train", color="steelblue")
+        ax.plot(epochs, hist.history["val_loss"], label="Val",   color="tomato")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("MSE Loss")
+        ax.set_title(f"Training History — {name}")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+    print(f"Saved: {save_path}")
+
+
 def plot_rmse_by_lead(
     rmse_list,
     station_names,
@@ -147,7 +172,8 @@ def evaluate_and_plot(station_name, nwm_path, usgs_path, model_path):
     data = process_station(station_name, nwm_path, usgs_path)
     model = keras.models.load_model(model_path)
 
-    preds = model.predict(data["X_test"], verbose=0)
+    X_test = np.concatenate([data["X_nwm_test"], data["X_usgs_test"]], axis=1)
+    preds = model.predict(X_test, verbose=0)
     rmse = _rmse_by_lead(data["y_test"], preds)
 
     plot_corrected_vs_observed(data, preds, station_name)

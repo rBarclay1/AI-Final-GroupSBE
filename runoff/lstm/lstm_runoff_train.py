@@ -15,6 +15,7 @@ from runoff_data_process import (
 )
 
 from lstm_runoff_model import build_runoff_lstm
+from lstm_runoff_plot import plot_training_history, plot_rmse_by_lead, plot_scatter, plot_corrected_vs_observed
 
 _RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results')
 os.makedirs(_RESULTS_DIR, exist_ok=True)
@@ -55,19 +56,23 @@ def run(station_name, nwm_path, usgs_path):
         ),
     ]
 
+    X_train = np.concatenate([data['X_nwm_train'], data['X_usgs_train']], axis=1)
+    X_val   = np.concatenate([data['X_nwm_val'],   data['X_usgs_val']],   axis=1)
+    X_test  = np.concatenate([data['X_nwm_test'],  data['X_usgs_test']],  axis=1)
+
     history = model.fit(
-        data['X_train'], data['y_train'],
+        X_train, data['y_train'],
         batch_size=BATCH_SIZE,
         epochs=EPOCHS,
-        validation_data=(data['X_val'], data['y_val']),
+        validation_data=(X_val, data['y_val']),
         callbacks=callbacks,
         verbose=1,
     )
 
-    test_mse = model.evaluate(data['X_test'], data['y_test'], verbose=0)[0]
+    test_mse = model.evaluate(X_test, data['y_test'], verbose=0)[0]
     print(f"\n  Test MSE : {test_mse:.6f}")
 
-    preds = model.predict(data['X_test'], verbose=0)
+    preds = model.predict(X_test, verbose=0)
     rmse_per_lead = np.sqrt(np.mean((preds - data['y_test']) ** 2, axis=0))
 
     print("\n  RMSE by lead hour (m³/s):")
@@ -84,4 +89,10 @@ if __name__ == "__main__":
     model_a, data_a, history_a, preds_a, rmse_a = run(name_a, STATION_A_NWM_PATH, STATION_A_USGS_PATH)
     model_b, data_b, history_b, preds_b, rmse_b = run(name_b, STATION_B_NWM_PATH, STATION_B_USGS_PATH)
 
-    print("\nSaved models in:", _RESULTS_DIR)
+    plot_training_history([history_a, history_b], [name_a, name_b])
+    plot_rmse_by_lead([rmse_a, rmse_b], [name_a, name_b])
+    plot_scatter([data_a, data_b], [preds_a, preds_b], [name_a, name_b])
+    plot_corrected_vs_observed(data_a, preds_a, name_a)
+    plot_corrected_vs_observed(data_b, preds_b, name_b)
+
+    print("\nSaved results in:", _RESULTS_DIR)
