@@ -8,8 +8,10 @@ yolo_dorianet_per_class_accuracy.png
 
 import os
 import re
+import math
 import shutil
 import numpy as np
+from collections import Counter
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report
@@ -24,10 +26,10 @@ _RESULTS_DIR = _SCRIPT_DIR / 'results'
 #Hyperparameters 
 MODEL_CKPT  = 'yolov8m-cls.pt'
 CLASS_NAMES = ['Level0', 'Level1', 'Level2', 'Level3', 'Level4', 'Level5']
-IMG_SIZE    = 224   # identical to CNN
+IMG_SIZE    = 256
 BATCH       = 32    # identical to CNN
-EPOCHS      = 50    # identical to CNN phase-1
-PATIENCE    = 12    # early-stopping patience, mirrors CNN
+EPOCHS      = 80
+PATIENCE    = 25
 SEED        = 42    # identical to CNN split seed
 
 
@@ -65,6 +67,9 @@ def _build_yolo_dataset(
     if dest.exists():
         shutil.rmtree(dest)
 
+    train_counts = Counter(y_train)
+    target = max(train_counts.values())
+
     for split_name, paths, labels in [
         ('train', X_train, y_train),
         ('val',   X_val,   y_val),
@@ -73,9 +78,16 @@ def _build_yolo_dataset(
         for src, lbl in zip(paths, labels):
             dst_dir = dest / split_name / CLASS_NAMES[lbl]
             dst_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst_dir / Path(src).name)
+            if split_name == 'train':
+                repeat = math.ceil(target / train_counts[lbl])
+                for i in range(repeat):
+                    shutil.copy2(src, dst_dir / f"{i}_{Path(src).name}")
+            else:
+                shutil.copy2(src, dst_dir / Path(src).name)
 
     print(f"  Dataset staged at: {dest}")
+    print(f"  Train class counts (before): { {CLASS_NAMES[k]: v for k, v in sorted(train_counts.items())} }")
+    print(f"  Oversampled to target: {target} per class")
     return dest
 
 
@@ -92,11 +104,15 @@ def train_model(dataset_dir: Path, results_dir: Path) -> YOLO:
         workers=0,
         dropout=0.5,
         label_smoothing=0.1,
+        flipud=0.5,
+        degrees=15.0,
+        scale=0.1,
+        mixup=0.1,
         project=str(results_dir),
-        name='yolo_dorianet',
+        name='yolo_dorianet_v2',
         exist_ok=True,
     )
-    best = results_dir / 'yolo_dorianet' / 'weights' / 'best.pt'
+    best = results_dir / 'yolo_dorianet_v2' / 'weights' / 'best.pt'
     print(f"\nLoading best weights: {best}")
     return YOLO(str(best))
 
