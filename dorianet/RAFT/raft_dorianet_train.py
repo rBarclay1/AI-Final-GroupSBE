@@ -109,6 +109,65 @@ def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
+def _save_training_performance_plot(history_path: Path, out_dir: Path) -> None:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib not installed; skipping training performance plot.")
+        return
+
+    history = _read_jsonl(history_path)
+    if len(history) == 0:
+        print(f"No training history found in {history_path}; skipping plot.")
+        return
+
+    epochs = [item["epoch"] for item in history]
+    train_loss = [item["train"]["loss"] for item in history]
+    train_photo = [item["train"]["photo"] for item in history]
+    train_smooth = [item["train"]["smooth"] for item in history]
+
+    val_loss = [item.get("val", {}).get("loss") for item in history]
+    val_photo = [item.get("val", {}).get("photo") for item in history]
+    val_smooth = [item.get("val", {}).get("smooth") for item in history]
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig.suptitle("RAFT Training Performance", fontsize=16)
+
+    axes[0].plot(epochs, train_loss, marker="o", label="Train Loss")
+    if any(v is not None for v in val_loss):
+        axes[0].plot(epochs, val_loss, marker="o", label="Val Loss")
+    axes[0].set_title("Loss")
+    axes[0].set_xlabel("Epoch")
+    axes[0].set_ylabel("Loss")
+    axes[0].legend()
+    axes[0].grid(True)
+
+    axes[1].plot(epochs, train_photo, marker="o", label="Train Photo")
+    if any(v is not None for v in val_photo):
+        axes[1].plot(epochs, val_photo, marker="o", label="Val Photo")
+    axes[1].set_title("Photometric Loss")
+    axes[1].set_xlabel("Epoch")
+    axes[1].set_ylabel("Photometric Loss")
+    axes[1].legend()
+    axes[1].grid(True)
+
+    axes[2].plot(epochs, train_smooth, marker="o", label="Train Smooth")
+    if any(v is not None for v in val_smooth):
+        axes[2].plot(epochs, val_smooth, marker="o", label="Val Smooth")
+    axes[2].set_title("Smoothness Loss")
+    axes[2].set_xlabel("Epoch")
+    axes[2].set_ylabel("Smoothness Loss")
+    axes[2].legend()
+    axes[2].grid(True)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    output = out_dir / "training_performance.png"
+    plt.savefig(output, dpi=150)
+    plt.close(fig)
+    print(f"Saved training performance plot to {output}")
+
+
 class RaftPairsDataset(Dataset):
     def __init__(
         self,
@@ -119,6 +178,9 @@ class RaftPairsDataset(Dataset):
         seed: int = 0,
     ) -> None:
         self.repo_root = _repo_root()
+        # Resolve manifest path relative to repo root if it's relative
+        if not manifest_path.is_absolute():
+            manifest_path = self.repo_root / manifest_path
         self.rows = _read_jsonl(manifest_path)
         self.crop_hw = crop_hw
         self.augment = augment
@@ -129,8 +191,11 @@ class RaftPairsDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         r = self.rows[idx]
-        p1 = (self.repo_root / r["image_1"]).resolve()
-        p2 = (self.repo_root / r["image_2"]).resolve()
+        # Convert backslashes to forward slashes for cross-platform compatibility
+        img1_path = r["image_1"].replace("\\", "/")
+        img2_path = r["image_2"].replace("\\", "/")
+        p1 = (self.repo_root / img1_path).resolve()
+        p2 = (self.repo_root / img2_path).resolve()
         a = _load_image_rgb(p1)
         b = _load_image_rgb(p2)
 
@@ -252,6 +317,9 @@ def train(
     log_every: int,
     max_steps_per_epoch: Optional[int],
 ) -> None:
+    repo_root = _repo_root()
+    if not out_dir.is_absolute():
+        out_dir = repo_root / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
     crop_hw: Optional[Tuple[int, int]] = None
@@ -350,6 +418,7 @@ def train(
         }
 
     best_val = float("inf")
+    history: List[Dict[str, Any]] = []
     for epoch in range(1, epochs + 1):
         print(json.dumps({"event": "epoch_start", "epoch": epoch}))
         tr = run_epoch(train_dl, train_mode=True)
@@ -368,6 +437,12 @@ def train(
 
         print(json.dumps(log, indent=2))
 
+        history.append(log)
+        history_path = out_dir / "train_history.jsonl"
+        with history_path.open("w", encoding="utf-8") as f:
+            for item in history:
+                f.write(json.dumps(item) + "\n")
+
         ckpt = {
             "epoch": epoch,
             "model_name": model_name,
@@ -380,18 +455,20 @@ def train(
         if is_best:
             torch.save(ckpt, out_dir / "best.pt")
 
+    _save_training_performance_plot(out_dir / "train_history.jsonl", out_dir)
+
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     p = argparse.ArgumentParser(description="Train/fine-tune RAFT on DORIANET pairs (self-supervised).")
     p.add_argument(
         "--train-manifest",
         type=str,
-        default=str(Path("dorianet/data/raft/manifests/train.jsonl")),
+        default=str(Path("dorianet/RAFT/data/manifests/train.jsonl")),
     )
     p.add_argument(
         "--val-manifest",
         type=str,
-        default=str(Path("dorianet/data/raft/manifests/val.jsonl")),
+        default=str(Path("dorianet/RAFT/data/manifests/val.jsonl")),
     )
     p.add_argument("--out-dir", type=str, default=str(Path("dorianet/RAFT/results")))
     p.add_argument("--model", type=str, default="small", choices=["small", "large"])

@@ -1,0 +1,12 @@
+{
+  "raw_root": "C:\\Users\\ender\\OneDrive\\Desktop\\School\\AI\\AI-Final\\AI-Final-GroupSBE\\dorianet\\data\\raw",
+  "out_root": "C:\\Users\\ender\\OneDrive\\Desktop\\School\\AI\\AI-Final\\AI-Final-GroupSBE\\dorianet\\data\\raft",
+  "videos": 3,
+  "frames_indexed": 271,
+  "pairs_total": 268,
+  "pairs_train": 118,
+  "pairs_val": 51,
+  "pairs_test": 99,
+  "write_images": false,
+  "resize_wh": null
+}
